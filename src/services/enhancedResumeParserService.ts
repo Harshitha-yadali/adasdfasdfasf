@@ -17,7 +17,11 @@ import {
   Certification,
 } from '../types/resume';
 
-const CLOUDFLARE_WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'https://damp-haze-85c6.harshithayadali30.workers.dev';
+const CLOUDFLARE_WORKER_URL = (
+  import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 
+  'https://damp-haze-85c6.harshithayadali30.workers.dev'
+).replace(/\/$/, ''); // Remove any trailing slash
+console.log('🔗 Worker URL:', CLOUDFLARE_WORKER_URL);
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -271,7 +275,25 @@ export class EnhancedResumeParserService {
     try {
       const base64 = await this.fileToBase64(file);
 
-      const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr`, {
+    const ocrUrl = `${CLOUDFLARE_WORKER_URL}/ocr`;
+console.log('📡 OCR URL:', ocrUrl);
+const response = await fetch(ocrUrl, {
+```
+
+---
+
+## 🚀 Testing Steps
+
+1. **Make the changes above**
+2. **Stop dev server** (Ctrl+C)
+3. **Restart:** `npm run dev`
+4. **Hard refresh** browser (Ctrl+Shift+R)
+5. **Upload a resume**
+6. **Check console** - you should see:
+```
+🔗 Worker URL: https://damp-haze-85c6.harshithayadali30.workers.dev
+📡 OCR URL: https://damp-haze-85c6.harshithayadali30.workers.dev/ocr
+                                                              ↑ SINGLE SLASH ✅
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
