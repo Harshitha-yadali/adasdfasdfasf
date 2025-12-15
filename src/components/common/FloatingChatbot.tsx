@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bot, Send, X } from "lucide-react";
+import { callCloudflareAI } from "../../utils/cloudflareApi";
 
 interface Message {
   role: "user" | "assistant";
@@ -14,12 +15,6 @@ export const FloatingChatbot: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showFaq, setShowFaq] = useState(true);
   const [showAllChips, setShowAllChips] = useState(false);
-
-  const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-  useEffect(() => {
-    console.log("Gemini API Key Loaded:", GEMINI_KEY ? "Loaded" : "Undefined");
-  }, [GEMINI_KEY]);
 
   const toggleOpen = () => {
     if (isOpen) {
@@ -72,29 +67,7 @@ End payment-related answers with:
 "For billing or payment issues, email primoboostai@gmail.com with a screenshot. Our team replies within 2 minutes."
 `;
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: `${systemPrompt}\n\nUser: ${text}` }],
-              },
-            ],
-          }),
-        }
-      );
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Gemini API error");
-
-      const reply =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "Sorry, I'm having trouble right now. Please try again later.";
-
+      const reply = await callCloudflareAI(`${systemPrompt}\n\nUser: ${text}`);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch (err) {
       console.error("Chat Error:", err);
