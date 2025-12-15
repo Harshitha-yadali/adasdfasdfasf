@@ -1,10 +1,9 @@
 import { ResumeData } from '../types/resume';
 import { ProjectAnalysis, ProjectSuitabilityResult } from '../types/analysis';
 import { edenAITextService } from './edenAITextService';
+import { cloudflareWorkerService } from './cloudflareWorkerService';
 
-const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_API_TOKEN || '';
-
-console.log('ProjectAnalysisService: Using EdenAI + GitHub API');
+console.log('ProjectAnalysisService: Using Cloudflare Worker proxy for AI + GitHub');
 
 export const analyzeProjectSuitability = async (
   resumeData: ResumeData,
@@ -202,38 +201,34 @@ export const fetchGitHubProjects = async (techStack: string[], role: string): Pr
   try {
     // Create search query based on tech stack and role
     const query = `${role} ${techStack.slice(0, 3).join(' ')}`;
-    
-    const response = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=10`, {
-      headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
+
+    console.log('🔒 Fetching GitHub projects through Cloudflare Worker');
+    console.log('   Query:', query);
+
+    const repos = await cloudflareWorkerService.fetchGitHubRepos(query, {
+      sort: 'stars',
+      order: 'desc',
+      perPage: 10
     });
 
-    if (!response.ok) {
-      console.warn(`GitHub API error: ${response.status}`);
-      throw new Error(`GitHub API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    if (!data.items || data.items.length === 0) {
+    if (!repos || repos.length === 0) {
       console.warn('No GitHub projects found for query:', query);
       return getFallbackProjects(techStack, role);
     }
-    
-    const projects = data.items.slice(0, 5).map((repo: any) => ({
-      title: repo.name,
-      githubUrl: repo.html_url,
+
+    const projects = repos.slice(0, 5).map((repo: any) => ({
+      title: repo.title,
+      githubUrl: repo.githubUrl,
       description: repo.description || '',
-      stars: repo.stargazers_count,
+      stars: repo.stars,
       language: repo.language
     }));
-    
-    // Validate URLs before returning
-    return projects.filter((p: any) => p.githubUrl && p.githubUrl.startsWith('https://github.com/'));
+
+    console.log('✅ GitHub projects fetched:', projects.length);
+
+    return projects;
   } catch (error) {
-    console.error('Error fetching GitHub projects:', error);
+    console.error('Error fetching GitHub projects through worker:', error);
     // Return fallback projects if GitHub API fails
     return getFallbackProjects(techStack, role);
   }
