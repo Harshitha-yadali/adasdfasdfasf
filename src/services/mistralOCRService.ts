@@ -148,36 +148,100 @@ Return only the cleaned, structured resume text. Do not add explanations or comm
   }
   
   /**
-   * Call Mistral OCR API (placeholder - implement based on actual API)
+   * Call Mistral OCR API via Cloudflare Worker
    */
-  private async callMistralOCRAPI(_base64Image: string, _mimeType: string): Promise<{
+  private async callMistralOCRAPI(base64Image: string, mimeType: string): Promise<{
     text: string;
     confidence: number;
     boundingBoxes?: BoundingBox[];
     language?: string;
   }> {
-    
-    // This is a placeholder implementation
-    // In production, you would integrate with actual Mistral OCR API
-    
+
+    const WORKER_URL = 'https://damp-haze-85c6.harshithayadali30.workers.dev';
+
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // For now, return a high-quality mock result
-      // Replace this with actual Mistral API integration
-      const mockText = this.generateHighQualityMockText();
-      
-      return {
-        text: mockText,
-        confidence: 88,
-        boundingBoxes: this.generateMockBoundingBoxes(mockText),
-        language: 'en'
-      };
-      
+      // Step 1: Start OCR job
+      const response = await fetch(`${WORKER_URL}/ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file: base64Image,
+          fileName: 'image.jpg',
+          fileType: mimeType,
+          provider: 'mistral'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`OCR API failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'OCR failed');
+      }
+
+      // Step 2: If we got a job ID, poll for results
+      if (result.jobId) {
+        const text = await this.pollOCRJob(result.jobId, WORKER_URL);
+        return {
+          text,
+          confidence: 85,
+          boundingBoxes: [],
+          language: 'en'
+        };
+      }
+
+      // If we got direct text, return it
+      if (result.text) {
+        return {
+          text: result.text,
+          confidence: result.confidence || 85,
+          boundingBoxes: [],
+          language: 'en'
+        };
+      }
+
+      throw new Error('No text extracted from OCR');
+
     } catch (error: any) {
       throw new Error(`Mistral OCR API error: ${error?.message || 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Poll OCR job until completion
+   */
+  private async pollOCRJob(jobId: string, workerUrl: string, maxAttempts = 30): Promise<string> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch(`${workerUrl}/ocr/${jobId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+
+          if (result.status === 'finished' && result.text) {
+            return result.text;
+          }
+
+          if (result.status === 'failed') {
+            throw new Error(result.error || 'OCR job failed');
+          }
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (error: any) {
+        // Continue polling on errors
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    throw new Error('OCR job timed out');
   }
   
   /**
