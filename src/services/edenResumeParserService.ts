@@ -122,7 +122,8 @@ export const parseResumeFromFile = async (file: File): Promise<ParsedResume> => 
 };
 
 /**
- * Extract text using Mistral OCR via Cloudflare Worker
+ * Extract text using Mistral OCR via Cloudflare Worker (synchronous)
+ * Uses EdenAI's sync OCR endpoint - returns text immediately, no polling needed
  */
 const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<string> => {
   const MAX_RETRIES = 2;
@@ -130,15 +131,14 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
   try {
     const base64File = await fileToBase64(file);
 
-    // Call Cloudflare Worker OCR endpoint
     const response = await fetch(`${WORKER_URL}/ocr`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'ocr',
         file: base64File,
         fileName: file.name,
         fileType: file.type,
+        provider: 'mistral',
       }),
     });
 
@@ -157,7 +157,7 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
         await delay(2000);
         return extractTextWithMistralOCR(file, retryCount + 1);
       }
-      throw new Error(`OCR API failed: ${response.status}`);
+      throw new Error(errorData.error || `OCR API failed: ${response.status}`);
     }
 
     const result = await response.json();
@@ -166,13 +166,7 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
       throw new Error(result.error || 'OCR failed');
     }
 
-    // If async job, poll for results
-    if (result.jobId) {
-      return await pollAsyncOCRResult(result.jobId);
-    }
-
-    // Direct text result
-    if (result.text) {
+    if (result.text && result.text.length > 0) {
       return result.text;
     }
 
@@ -185,47 +179,6 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
     }
     throw error;
   }
-};
-
-/**
- * Poll for async OCR job results via worker
- */
-const pollAsyncOCRResult = async (jobId: string, maxAttempts = 30): Promise<string> => {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      // Call Cloudflare Worker POST endpoint to poll job status
-      const response = await fetch(`${WORKER_URL}/ocr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'ocr_poll',
-          jobId: jobId,
-        }),
-      });
-
-      if (!response.ok) {
-        await delay(2000);
-        continue;
-      }
-
-      const result = await response.json();
-
-      if (result.status === 'finished' && result.text) {
-        return result.text;
-      }
-
-      if (result.status === 'failed') {
-        throw new Error(result.error || 'OCR job failed');
-      }
-
-      // Job still processing
-      await delay(2000);
-    } catch (error: any) {
-      await delay(2000);
-    }
-  }
-
-  throw new Error('OCR job timed out');
 };
 
 /**

@@ -285,8 +285,8 @@ function base64ToUint8Array(base64) {
 
 /**
  * Handle EdenAI OCR Proxy Requests
- * Route: /ocr (POST) - Start OCR job
- * Route: /ocr/:jobId (GET) - Poll OCR job status
+ * Route: /ocr (POST) - Synchronous OCR with Mistral + ChatGPT-4o-mini
+ * Uses EdenAI's synchronous OCR endpoint with required prompt field
  */
 async function handleOCRRequest(request, env, corsHeaders) {
   if (!env.EDENAI_API_KEY) {
@@ -298,10 +298,24 @@ async function handleOCRRequest(request, env, corsHeaders) {
 
   const url = new URL(request.url);
 
-  // POST /ocr - Start OCR job
+  // POST /ocr - Synchronous OCR extraction
   if (request.method === 'POST' && url.pathname === '/ocr') {
     try {
       const body = await request.json();
+      const { action } = body;
+
+      // Handle legacy polling requests - return immediately since we use sync now
+      if (action === 'ocr_poll') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            status: 'finished',
+            text: '',
+            message: 'Polling not needed - using synchronous OCR'
+          }),
+          { headers: corsHeaders }
+        );
+      }
 
       const { file, fileName, fileType, provider = 'mistral' } = body;
 
@@ -333,8 +347,10 @@ async function handleOCRRequest(request, env, corsHeaders) {
       const formData = new FormData();
       formData.append('providers', provider);
       formData.append('file', blob, resolvedFileName);
+      formData.append('prompt', 'Extract all readable text from this resume document accurately. Preserve the structure including sections like contact info, summary, experience, education, skills, projects, and certifications.');
 
-      const edenResponse = await fetch('https://api.edenai.run/v2/ocr/ocr_async', {
+      // Use synchronous OCR endpoint (returns text immediately)
+      const edenResponse = await fetch('https://api.edenai.run/v2/ocr/ocr', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${env.EDENAI_API_KEY}`
@@ -356,11 +372,51 @@ async function handleOCRRequest(request, env, corsHeaders) {
         );
       }
 
+      // Extract text from provider result (e.g., result.mistral.text)
+      const providerResult = result[provider] || result[Object.keys(result)[0]];
+
+      if (!providerResult) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'No OCR result from provider',
+            details: result
+          }),
+          { status: 500, headers: corsHeaders }
+        );
+      }
+
+      if (providerResult.status === 'fail') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: providerResult.error || 'OCR processing failed',
+            details: providerResult
+          }),
+          { status: 500, headers: corsHeaders }
+        );
+      }
+
+      const extractedText = providerResult.text || '';
+
+      if (!extractedText || extractedText.length < 20) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'OCR extracted insufficient text',
+            details: { textLength: extractedText.length }
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      // Return text directly (no job ID needed with sync endpoint)
       return new Response(
         JSON.stringify({
           success: true,
-          jobId: result.public_id || result.job_id,
-          provider: provider
+          text: extractedText,
+          provider: provider,
+          confidence: providerResult.confidence || 85
         }),
         { headers: corsHeaders }
       );
@@ -377,87 +433,17 @@ async function handleOCRRequest(request, env, corsHeaders) {
     }
   }
 
-  // GET /ocr/:jobId - Poll OCR job status
+  // GET requests - not needed with sync OCR but kept for compatibility
   if (request.method === 'GET' && url.pathname.startsWith('/ocr/')) {
-    try {
-      const jobId = url.pathname.replace('/ocr/', '');
-
-      if (!jobId) {
-        return new Response(
-          JSON.stringify({ error: "Job ID is required" }),
-          { status: 400, headers: corsHeaders }
-        );
-      }
-
-      // Poll EdenAI for job status
-      const edenResponse = await fetch(`https://api.edenai.run/v2/ocr/ocr_async/${jobId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${env.EDENAI_API_KEY}`
-        }
-      });
-
-      const result = await edenResponse.json();
-
-      if (!edenResponse.ok) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Failed to get OCR status',
-            details: result
-          }),
-          { status: edenResponse.status, headers: corsHeaders }
-        );
-      }
-
-      // Check if job is finished
-      const providerResult = result[Object.keys(result)[0]]; // Get first provider result
-
-      if (providerResult.status === 'success') {
-        // Extract text from result
-        const text = providerResult.text || '';
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            status: 'finished',
-            text: text,
-            confidence: providerResult.confidence || 85
-          }),
-          { headers: corsHeaders }
-        );
-      }
-
-      if (providerResult.status === 'fail') {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            status: 'failed',
-            error: providerResult.error || 'OCR processing failed'
-          }),
-          { headers: corsHeaders }
-        );
-      }
-
-      // Still processing
-      return new Response(
-        JSON.stringify({
-          success: true,
-          status: 'processing'
-        }),
-        { headers: corsHeaders }
-      );
-
-    } catch (error) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Failed to poll OCR status",
-          details: error.message
-        }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
+    return new Response(
+      JSON.stringify({
+        success: true,
+        status: 'finished',
+        text: '',
+        message: 'Polling deprecated - using synchronous OCR'
+      }),
+      { headers: corsHeaders }
+    );
   }
 
   // Method not allowed

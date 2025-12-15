@@ -258,7 +258,8 @@ export class EnhancedResumeParserService {
   }
 
   /**
-   * Enhanced OCR with better error handling - routes through Cloudflare Worker
+   * Enhanced OCR with better error handling - routes through Cloudflare Worker (synchronous)
+   * Uses EdenAI's sync OCR endpoint - returns text immediately, no polling needed
    */
   private static async extractTextWithEnhancedOCR(file: File): Promise<{
     text: string;
@@ -284,25 +285,20 @@ export class EnhancedResumeParserService {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OCR API failed: ${response.status} - ${errorText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `OCR API failed: ${response.status}`);
       }
 
       const result = await response.json();
 
-      if (result.jobId) {
-        const ocrResult = await this.pollEnhancedOCRResult(result.jobId);
-        return {
-          text: ocrResult.text || '',
-          confidence: ocrResult.confidence || 0.7,
-          rawResponse: ocrResult,
-        };
+      if (!result.success) {
+        throw new Error(result.error || 'OCR failed');
       }
 
-      if (result.text) {
+      if (result.text && result.text.length > 0) {
         return {
           text: result.text,
-          confidence: result.confidence || 0.7,
+          confidence: (result.confidence || 85) / 100,
           rawResponse: result,
         };
       }
@@ -325,48 +321,6 @@ export class EnhancedResumeParserService {
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = (error) => reject(error);
     });
-  }
-
-  /**
-   * Enhanced OCR result polling via Cloudflare Worker
-   */
-  private static async pollEnhancedOCRResult(jobId: string): Promise<any> {
-    const maxAttempts = 40;
-    const baseDelay = 1500;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      console.log(`🔍 Polling OCR result via Worker... (${attempt + 1}/${maxAttempts})`);
-
-      try {
-        const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr/${jobId}`, {
-          method: 'GET',
-        });
-
-        if (!response.ok) {
-          await delay(baseDelay * Math.min(attempt + 1, 4));
-          continue;
-        }
-
-        const result = await response.json();
-
-        if (result.status === 'finished') {
-          console.log('✅ OCR job completed successfully');
-          return result.results || result;
-        }
-
-        if (result.status === 'failed') {
-          throw new Error('OCR job failed on server');
-        }
-
-        await delay(baseDelay * Math.min(attempt + 1, 3));
-
-      } catch (error) {
-        console.warn(`⚠️ Poll attempt ${attempt + 1} failed:`, error);
-        await delay(baseDelay);
-      }
-    }
-
-    throw new Error('OCR job timed out - document may be too complex');
   }
 
   /**
