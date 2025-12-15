@@ -4,12 +4,21 @@ interface RequestBody {
   prompt: string;
 }
 
-const WORKER_URL = 'https://damp-haze-85c6.harshithayadali30.workers.dev';
-// Check for server-side EdenAI key (server envs may use EDENAI_API_KEY)
-const SERVER_EDENAI_KEY = (typeof process !== 'undefined' && (process.env?.EDENAI_API_KEY || process.env?.VITE_EDENAI_API_KEY)) || '';
+interface CloudflareEnv {
+  EDENAI_API_KEY?: string;
+  VITE_EDENAI_API_KEY?: string;
+  WORKER_URL?: string;
+}
 
-export async function onRequestPost(context: { request: Request }) {
-  const { request } = context;
+interface CloudflareContext {
+  request: Request;
+  env: CloudflareEnv;
+}
+
+const DEFAULT_WORKER_URL = 'https://damp-haze-85c6.harshithayadali30.workers.dev';
+
+export async function onRequestPost(context: CloudflareContext) {
+  const { request, env } = context;
 
   try {
     // Parse incoming request
@@ -33,8 +42,11 @@ export async function onRequestPost(context: { request: Request }) {
       );
     }
 
+    // Get Worker URL from environment or use default
+    const workerUrl = env.WORKER_URL || DEFAULT_WORKER_URL;
+
     // Call Worker directly
-    const workerResponse = await fetch(WORKER_URL, {
+    const workerResponse = await fetch(workerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -108,10 +120,13 @@ export async function onRequestOptions() {
 }
 
 // Lightweight GET endpoint to check server-side EdenAI key presence
-export async function onRequestGet(context: { request: Request }) {
+export async function onRequestGet(context: CloudflareContext) {
+  const { env } = context;
+
   try {
-    const configured = Boolean(SERVER_EDENAI_KEY && SERVER_EDENAI_KEY.length > 0);
-    const masked = configured ? `${SERVER_EDENAI_KEY.slice(0, 4)}...${SERVER_EDENAI_KEY.slice(-4)}` : null;
+    const serverEdenAIKey = env.EDENAI_API_KEY || env.VITE_EDENAI_API_KEY || '';
+    const configured = Boolean(serverEdenAIKey && serverEdenAIKey.length > 0);
+    const masked = configured ? `${serverEdenAIKey.slice(0, 4)}...${serverEdenAIKey.slice(-4)}` : null;
 
     return new Response(
       JSON.stringify({ success: true, configured, masked }),
