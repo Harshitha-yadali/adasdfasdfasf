@@ -4,7 +4,7 @@
  * This prevents API keys from being exposed in frontend code
  */
 
-const CLOUDFLARE_WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'https://primoboost-ai-proxy.manojvaddi977.workers.dev';
+const CLOUDFLARE_WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'https://damp-haze-85c6.harshithayadali30.workers.dev';
 
 console.log('Cloudflare Worker Service: Using URL:', CLOUDFLARE_WORKER_URL);
 
