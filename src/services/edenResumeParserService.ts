@@ -135,10 +135,10 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        action: 'ocr',
         file: base64File,
         fileName: file.name,
         fileType: file.type,
-        provider: 'mistral' // Use Mistral OCR
       }),
     });
 
@@ -193,10 +193,14 @@ const extractTextWithMistralOCR = async (file: File, retryCount = 0): Promise<st
 const pollAsyncOCRResult = async (jobId: string, maxAttempts = 30): Promise<string> => {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      // Call Cloudflare Worker GET endpoint to poll job status
-      const response = await fetch(`${WORKER_URL}/ocr/${jobId}`, {
-        method: 'GET',
+      // Call Cloudflare Worker POST endpoint to poll job status
+      const response = await fetch(`${WORKER_URL}/ocr`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'ocr_poll',
+          jobId: jobId,
+        }),
       });
 
       if (!response.ok) {
