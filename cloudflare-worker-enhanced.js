@@ -66,7 +66,7 @@ export default {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            providers: ["openai"],
+            providers: ["openai/gpt-4o-mini"],
             text: prompt
           }),
           signal: controller.signal
