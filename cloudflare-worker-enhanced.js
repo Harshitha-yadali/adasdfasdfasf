@@ -12,14 +12,18 @@ export default {
     }
 
     const url = new URL(request.url);
+    
+    // Normalize pathname to handle double slashes
+    const pathname = url.pathname.replace(/\/+/g, '/');
+    console.log('📍 Request path:', pathname);
 
     // GitHub API Proxy Route
-    if (url.pathname.startsWith('/github')) {
+    if (pathname.startsWith('/github')) {
       return handleGitHubRequest(request, env, corsHeaders);
     }
 
-    // EdenAI OCR Proxy Routes
-    if (url.pathname.startsWith('/ocr')) {
+    // EdenAI OCR Proxy Route
+    if (pathname === '/ocr' || pathname.startsWith('/ocr/')) {
       return handleOCRRequest(request, env, corsHeaders);
     }
 
@@ -42,7 +46,7 @@ export default {
     }
 
     const prompt = body.prompt;
-    const preferredModel = body.model; // Optional: allow frontend to specify model
+    const preferredModel = body.model;
 
     if (!prompt) {
       return new Response(
@@ -142,13 +146,12 @@ export default {
       }
     }
 
-    /* ================== 3️⃣ OPENROUTER (ENHANCED) ================== */
+    /* ================== 3️⃣ OPENROUTER ================== */
     if (env.OPENROUTER_API_KEY) {
-      // Choose model based on request or use smart fallback
       const models = [
-        preferredModel || "openai/gpt-4o-mini", // Fast & cheap
-        "google/gemini-2.0-flash-exp:free",     // Free alternative
-        "meta-llama/llama-3.1-8b-instruct:free", // Free backup
+        preferredModel || "openai/gpt-4o-mini",
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.1-8b-instruct:free",
       ];
 
       for (const model of models) {
@@ -161,8 +164,8 @@ export default {
             headers: {
               "Authorization": `Bearer ${env.OPENROUTER_API_KEY}`,
               "Content-Type": "application/json",
-              "HTTP-Referer": "https://primoboost.com", // Optional: your site
-              "X-Title": "PrimoBoost AI" // Optional: your app name
+              "HTTP-Referer": "https://primoboost.com",
+              "X-Title": "PrimoBoost AI"
             },
             body: JSON.stringify({
               model: model,
@@ -219,8 +222,6 @@ export default {
 
 /**
  * Handle GitHub API Proxy Requests
- * Route: /github/*
- * Example: /github/search/repositories?q=react&sort=stars
  */
 async function handleGitHubRequest(request, env, corsHeaders) {
   if (!env.GITHUB_API_TOKEN) {
@@ -285,8 +286,7 @@ function base64ToUint8Array(base64) {
 
 /**
  * Handle EdenAI OCR Proxy Requests
- * Route: /ocr (POST) - Synchronous OCR with Mistral + ChatGPT-4o-mini
- * Uses EdenAI's synchronous OCR endpoint with required prompt field
+ * Based on official EdenAI OCR API documentation
  */
 async function handleOCRRequest(request, env, corsHeaders) {
   if (!env.EDENAI_API_KEY) {
@@ -297,27 +297,13 @@ async function handleOCRRequest(request, env, corsHeaders) {
   }
 
   const url = new URL(request.url);
+  const pathname = url.pathname.replace(/\/+/g, '/');
 
-  // POST /ocr - Synchronous OCR extraction
-  if (request.method === 'POST' && url.pathname === '/ocr') {
+  // POST /ocr - OCR extraction
+  if (request.method === 'POST' && pathname === '/ocr') {
     try {
       const body = await request.json();
-      const { action } = body;
-
-      // Handle legacy polling requests - return immediately since we use sync now
-      if (action === 'ocr_poll') {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            status: 'finished',
-            text: '',
-            message: 'Polling not needed - using synchronous OCR'
-          }),
-          { headers: corsHeaders }
-        );
-      }
-
-      const { file, fileName, fileType, provider = 'mistral' } = body;
+      const { file, fileName, fileType } = body;
 
       if (!file) {
         return new Response(
@@ -326,6 +312,7 @@ async function handleOCRRequest(request, env, corsHeaders) {
         );
       }
 
+      // Convert base64 to binary
       let binaryData;
       try {
         binaryData = base64ToUint8Array(file);
@@ -344,12 +331,28 @@ async function handleOCRRequest(request, env, corsHeaders) {
       const resolvedFileName = fileName || 'resume.pdf';
       const blob = new Blob([binaryData], { type: mimeType });
 
-      const formData = new FormData();
-      formData.append('providers', provider);
-      formData.append('file', blob, resolvedFileName);
-      formData.append('prompt', 'Extract all readable text from this resume document accurately. Preserve the structure including sections like contact info, summary, experience, education, skills, projects, and certifications.');
+      // ✅ Smart provider selection based on file type
+      let provider;
+      if (mimeType === 'application/pdf') {
+        // PDF files: use Google (best for PDFs)
+        provider = 'google';
+      } else if (mimeType.startsWith('image/')) {
+        // Image files: use Mistral (supports images only)
+        provider = 'mistral';
+      } else {
+        // Default fallback
+        provider = 'google';
+      }
 
-      // Use synchronous OCR endpoint (returns text immediately)
+      // Build FormData according to EdenAI docs
+      const formData = new FormData();
+      formData.append('providers', provider); // String format (per docs)
+      formData.append('file', blob, resolvedFileName);
+      formData.append('language', 'en'); // Optional but helpful
+
+      console.log('🔍 Calling EdenAI OCR with provider:', provider, 'for file type:', mimeType);
+
+      // Call EdenAI OCR endpoint
       const edenResponse = await fetch('https://api.edenai.run/v2/ocr/ocr', {
         method: 'POST',
         headers: {
@@ -359,8 +362,10 @@ async function handleOCRRequest(request, env, corsHeaders) {
       });
 
       const result = await edenResponse.json();
+      console.log('📊 EdenAI Response Status:', edenResponse.status);
 
       if (!edenResponse.ok) {
+        console.error('❌ EdenAI Error:', result);
         return new Response(
           JSON.stringify({
             success: false,
@@ -372,25 +377,28 @@ async function handleOCRRequest(request, env, corsHeaders) {
         );
       }
 
-      // Extract text from provider result (e.g., result.mistral.text)
-      const providerResult = result[provider] || result[Object.keys(result)[0]];
+      // Extract text from provider result
+      const providerResult = result[provider];
 
       if (!providerResult) {
+        console.error('❌ No result from provider:', provider);
         return new Response(
           JSON.stringify({
             success: false,
-            error: 'No OCR result from provider',
-            details: result
+            error: `No OCR result from provider: ${provider}`,
+            details: result,
+            availableProviders: Object.keys(result)
           }),
           { status: 500, headers: corsHeaders }
         );
       }
 
       if (providerResult.status === 'fail') {
+        console.error('❌ Provider failed:', providerResult);
         return new Response(
           JSON.stringify({
             success: false,
-            error: providerResult.error || 'OCR processing failed',
+            error: providerResult.error?.message || 'OCR processing failed',
             details: providerResult
           }),
           { status: 500, headers: corsHeaders }
@@ -400,28 +408,35 @@ async function handleOCRRequest(request, env, corsHeaders) {
       const extractedText = providerResult.text || '';
 
       if (!extractedText || extractedText.length < 20) {
+        console.warn('⚠️ Insufficient text:', extractedText.length, 'chars');
         return new Response(
           JSON.stringify({
             success: false,
             error: 'OCR extracted insufficient text',
-            details: { textLength: extractedText.length }
+            details: { 
+              textLength: extractedText.length,
+              provider: provider,
+              status: providerResult.status
+            }
           }),
           { status: 400, headers: corsHeaders }
         );
       }
 
-      // Return text directly (no job ID needed with sync endpoint)
+      console.log('✅ OCR Success:', extractedText.length, 'characters');
+
       return new Response(
         JSON.stringify({
           success: true,
           text: extractedText,
           provider: provider,
-          confidence: providerResult.confidence || 85
+          confidence: 85
         }),
         { headers: corsHeaders }
       );
 
     } catch (error) {
+      console.error('❌ OCR Handler Error:', error);
       return new Response(
         JSON.stringify({
           success: false,
@@ -431,19 +446,6 @@ async function handleOCRRequest(request, env, corsHeaders) {
         { status: 500, headers: corsHeaders }
       );
     }
-  }
-
-  // GET requests - not needed with sync OCR but kept for compatibility
-  if (request.method === 'GET' && url.pathname.startsWith('/ocr/')) {
-    return new Response(
-      JSON.stringify({
-        success: true,
-        status: 'finished',
-        text: '',
-        message: 'Polling deprecated - using synchronous OCR'
-      }),
-      { headers: corsHeaders }
-    );
   }
 
   // Method not allowed
