@@ -267,6 +267,23 @@ async function handleGitHubRequest(request, env, corsHeaders) {
 }
 
 /**
+ * Convert base64 string to Uint8Array
+ */
+function base64ToUint8Array(base64) {
+  let cleanBase64 = base64;
+  if (base64.includes(',')) {
+    cleanBase64 = base64.split(',')[1];
+  }
+
+  const binaryString = atob(cleanBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Handle EdenAI OCR Proxy Requests
  * Route: /ocr (POST) - Start OCR job
  * Route: /ocr/:jobId (GET) - Poll OCR job status
@@ -286,7 +303,6 @@ async function handleOCRRequest(request, env, corsHeaders) {
     try {
       const body = await request.json();
 
-      // Extract data from request
       const { file, fileName, fileType, provider = 'mistral' } = body;
 
       if (!file) {
@@ -296,19 +312,34 @@ async function handleOCRRequest(request, env, corsHeaders) {
         );
       }
 
-      // Forward to EdenAI OCR API
+      let binaryData;
+      try {
+        binaryData = base64ToUint8Array(file);
+      } catch (decodeError) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Failed to decode base64 file data",
+            details: decodeError.message
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+
+      const mimeType = fileType || 'application/pdf';
+      const resolvedFileName = fileName || 'resume.pdf';
+      const blob = new Blob([binaryData], { type: mimeType });
+
+      const formData = new FormData();
+      formData.append('providers', provider);
+      formData.append('file', blob, resolvedFileName);
+
       const edenResponse = await fetch('https://api.edenai.run/v2/ocr/ocr_async', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${env.EDENAI_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${env.EDENAI_API_KEY}`
         },
-        body: JSON.stringify({
-          providers: [provider],
-          file: file,
-          file_name: fileName || 'resume.pdf',
-          file_type: fileType || 'application/pdf'
-        })
+        body: formData
       });
 
       const result = await edenResponse.json();
@@ -318,17 +349,17 @@ async function handleOCRRequest(request, env, corsHeaders) {
           JSON.stringify({
             success: false,
             error: result.error || 'OCR API failed',
-            details: result
+            details: result,
+            status: edenResponse.status
           }),
           { status: edenResponse.status, headers: corsHeaders }
         );
       }
 
-      // Return job ID for polling
       return new Response(
         JSON.stringify({
           success: true,
-          jobId: result.job_id,
+          jobId: result.public_id || result.job_id,
           provider: provider
         }),
         { headers: corsHeaders }
