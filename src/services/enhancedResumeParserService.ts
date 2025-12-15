@@ -286,7 +286,7 @@ const response = await fetch(ocrUrl, {
           file: base64,
           fileName: file.name,
           fileType: file.type || 'application/pdf',
-          provider: 'mistral',
+          
         }),
       });
 
