@@ -2,7 +2,7 @@ export default {
   async fetch(request, env) {
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
       "Content-Type": "application/json"
     };
@@ -11,6 +11,14 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    const url = new URL(request.url);
+
+    // GitHub API Proxy Route
+    if (url.pathname.startsWith('/github')) {
+      return handleGitHubRequest(request, env, corsHeaders);
+    }
+
+    // AI Chat Route (default)
     if (request.method !== "POST") {
       return new Response(
         JSON.stringify({ error: "Method not allowed" }),
@@ -203,3 +211,52 @@ export default {
     );
   }
 };
+
+/**
+ * Handle GitHub API Proxy Requests
+ * Route: /github/*
+ * Example: /github/search/repositories?q=react&sort=stars
+ */
+async function handleGitHubRequest(request, env, corsHeaders) {
+  if (!env.GITHUB_API_TOKEN) {
+    return new Response(
+      JSON.stringify({ error: "GitHub API token not configured" }),
+      { status: 500, headers: corsHeaders }
+    );
+  }
+
+  const url = new URL(request.url);
+  const githubPath = url.pathname.replace(/^\/github/, '');
+  const githubUrl = `https://api.github.com${githubPath}${url.search}`;
+
+  try {
+    const headers = {
+      'Accept': 'application/vnd.github.v3+json',
+      'Authorization': `Bearer ${env.GITHUB_API_TOKEN}`,
+      'User-Agent': 'PrimoBoost-AI'
+    };
+
+    const response = await fetch(githubUrl, {
+      method: request.method,
+      headers: headers
+    });
+
+    const data = await response.json();
+
+    return new Response(
+      JSON.stringify(data),
+      {
+        status: response.status,
+        headers: corsHeaders
+      }
+    );
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: "GitHub API request failed",
+        details: error.message
+      }),
+      { status: 500, headers: corsHeaders }
+    );
+  }
+}

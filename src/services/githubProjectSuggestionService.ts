@@ -2,10 +2,7 @@
 // GitHub Project Suggestion Service - Suggests real GitHub projects as inspiration
 
 import { JdKeywords } from './projectMatchingEngine';
-
-// Use environment variable - DO NOT hard-code
-const GITHUB_API_TOKEN = import.meta.env.VITE_GITHUB_API_TOKEN || '';
-const GITHUB_SEARCH_URL = 'https://api.github.com/search/repositories';
+import { callGitHubAPI } from '../utils/cloudflareApi';
 
 // Suggested repository project interface
 export interface SuggestedRepoProject {
@@ -80,35 +77,19 @@ const buildSearchQueries = (jdKeywords: JdKeywords): string[] => {
  * Search GitHub repositories
  */
 const searchGitHubRepos = async (query: string, perPage: number = 5): Promise<GitHubRepo[]> => {
-  const headers: Record<string, string> = {
-    'Accept': 'application/vnd.github.v3+json',
-  };
-  
-  // Add auth header if token is available
-  if (GITHUB_API_TOKEN) {
-    headers['Authorization'] = `Bearer ${GITHUB_API_TOKEN}`;
-  }
-  
   try {
-    const url = new URL(GITHUB_SEARCH_URL);
-    url.searchParams.set('q', query);
-    url.searchParams.set('sort', 'stars');
-    url.searchParams.set('order', 'desc');
-    url.searchParams.set('per_page', String(perPage));
-    
-    const response = await fetch(url.toString(), { headers });
-    
-    if (!response.ok) {
-      if (response.status === 403) {
-        console.warn('GitHub API rate limit reached. Consider adding VITE_GITHUB_API_TOKEN.');
-      }
-      console.error(`GitHub API error: ${response.status}`);
-      return [];
-    }
-    
-    const data: GitHubSearchResponse = await response.json();
+    const data = await callGitHubAPI<GitHubSearchResponse>('/search/repositories', {
+      q: query,
+      sort: 'stars',
+      order: 'desc',
+      per_page: String(perPage)
+    });
+
     return data.items || [];
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message.includes('403')) {
+      console.warn('GitHub API rate limit reached (handled by Cloudflare Worker)');
+    }
     console.error('GitHub search error:', error);
     return [];
   }
