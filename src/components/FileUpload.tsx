@@ -1,8 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Upload, AlertCircle, CheckCircle, X, Sparkles, Quote, CreditCard } from 'lucide-react';
 import { ExtractionResult } from '../types/resume';
-import { parseResumeFromFile, ParsedResume } from '../services/edenResumeParserService';
+import { EnhancedResumeParserService, EnhancedParseResult } from '../services/enhancedResumeParserService';
 import { paymentService } from '../services/paymentService';
+
+type ParsedResume = EnhancedParseResult;
 
 // ATS Tips/Quotes for resume parsing
 const ATS_PARSING_QUOTES = [
@@ -183,8 +185,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setParseSuccess(false);
 
     try {
-      // Use EdenAI parser directly
-      const parsedResume = await parseResumeFromFile(file);
+      // Use EnhancedResumeParserService with direct Eden AI calls
+      const parsedResume = await EnhancedResumeParserService.parseResumeFromFile(file);
 
       // Create ExtractionResult from parsed text
       const extractionResult: ExtractionResult = {

@@ -32,8 +32,9 @@ import { ResumePreviewControls } from './ResumePreviewControls';
 import { FullScreenPreviewModal } from './FullScreenPreviewModal';
 import { jobsService } from '../services/jobsService';
 
-// NEW: EdenAI and enhanced services imports
-import { parseResumeFromFile, ParsedResume } from '../services/edenResumeParserService';
+// NEW: EdenAI and enhanced services imports - Direct Eden AI calls (no worker)
+import { EnhancedResumeParserService, EnhancedParseResult } from '../services/enhancedResumeParserService';
+type ParsedResume = EnhancedParseResult;
 import { summarizeJd } from '../services/jdSummarizerService';
 import { matchProjectsToJd, extractJdKeywords, ProjectMatchResult } from '../services/projectMatchingEngine';
 import { processResumeText } from '../services/edenModerationService';
