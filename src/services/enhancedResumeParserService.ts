@@ -17,9 +17,7 @@ import {
   Certification,
 } from '../types/resume';
 
-const EDENAI_API_KEY = import.meta.env.VITE_EDENAI_API_KEY || '';
-const EDENAI_OCR_ASYNC_URL = 'https://api.edenai.run/v2/ocr/ocr_async';
-const EDENAI_CHAT_URL = 'https://api.edenai.run/v2/text/chat';
+const CLOUDFLARE_WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'https://damp-haze-85c6.harshithayadali30.workers.dev';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -68,13 +66,9 @@ export class EnhancedResumeParserService {
    * Main parsing function with enhanced error handling and multi-layer extraction
    */
   static async parseResumeFromFile(file: File): Promise<EnhancedParseResult> {
-    console.log('🚀 Enhanced Resume Parser - P0 Enterprise Fixes');
+    console.log('🚀 Enhanced Resume Parser - P0 Enterprise Fixes (via Cloudflare Worker)');
     console.log('═══════════════════════════════════════════════════════════');
     console.log('📄 File:', file.name, '|', (file.size / 1024).toFixed(2), 'KB', '| Type:', file.type);
-
-    if (!EDENAI_API_KEY) {
-      throw new Error('EdenAI API key not configured. Please check your .env file.');
-    }
 
     // Step 1: Analyze file and determine extraction strategy
     const extractionStrategy = this.determineExtractionStrategy(file);
@@ -264,41 +258,57 @@ export class EnhancedResumeParserService {
   }
 
   /**
-   * Enhanced OCR with better error handling and multi-provider support
+   * Enhanced OCR with better error handling - routes through Cloudflare Worker
    */
   private static async extractTextWithEnhancedOCR(file: File): Promise<{
     text: string;
     confidence: number;
     rawResponse: any;
   }> {
-    console.log('🔍 Enhanced OCR extraction...');
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('providers', 'mistral,google'); // Multi-provider for better reliability
-    formData.append('language', 'en');
-    formData.append('fallback_providers', 'amazon,microsoft'); // Additional fallbacks
+    console.log('🔍 Enhanced OCR extraction via Cloudflare Worker...');
 
     try {
-      const response = await fetch(EDENAI_OCR_ASYNC_URL, {
+      const base64 = await this.fileToBase64(file);
+
+      const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${EDENAI_API_KEY}` },
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          file: base64,
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          provider: 'mistral',
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`OCR API failed: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`OCR API failed: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();
-      
-      if (result.public_id) {
-        const ocrResult = await this.pollEnhancedOCRResult(result.public_id);
-        return this.extractBestTextFromOCRResult(ocrResult);
+
+      if (result.jobId) {
+        const ocrResult = await this.pollEnhancedOCRResult(result.jobId);
+        return {
+          text: ocrResult.text || '',
+          confidence: ocrResult.confidence || 0.7,
+          rawResponse: ocrResult,
+        };
       }
 
-      return this.extractBestTextFromOCRResult(result);
-      
+      if (result.text) {
+        return {
+          text: result.text,
+          confidence: result.confidence || 0.7,
+          rawResponse: result,
+        };
+      }
+
+      throw new Error('No text extracted from OCR');
+
     } catch (error) {
       console.error('❌ Enhanced OCR failed:', error);
       throw error;
@@ -306,47 +316,56 @@ export class EnhancedResumeParserService {
   }
 
   /**
-   * Enhanced OCR result polling with better timeout handling
+   * Convert File to base64 string
+   */
+  private static fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  }
+
+  /**
+   * Enhanced OCR result polling via Cloudflare Worker
    */
   private static async pollEnhancedOCRResult(jobId: string): Promise<any> {
-    const pollUrl = `https://api.edenai.run/v2/ocr/ocr_async/${jobId}`;
-    const maxAttempts = 40; // Increased for complex documents
-    const baseDelay = 1500; // Reduced initial delay
-    
+    const maxAttempts = 40;
+    const baseDelay = 1500;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      console.log(`🔍 Polling OCR result... (${attempt + 1}/${maxAttempts})`);
-      
+      console.log(`🔍 Polling OCR result via Worker... (${attempt + 1}/${maxAttempts})`);
+
       try {
-        const response = await fetch(pollUrl, {
+        const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr/${jobId}`, {
           method: 'GET',
-          headers: { Authorization: `Bearer ${EDENAI_API_KEY}` },
         });
 
         if (!response.ok) {
-          await delay(baseDelay * Math.min(attempt + 1, 4)); // Exponential backoff, capped
+          await delay(baseDelay * Math.min(attempt + 1, 4));
           continue;
         }
 
         const result = await response.json();
-        
+
         if (result.status === 'finished') {
           console.log('✅ OCR job completed successfully');
           return result.results || result;
         }
-        
+
         if (result.status === 'failed') {
           throw new Error('OCR job failed on server');
         }
-        
-        // Progressive delay
+
         await delay(baseDelay * Math.min(attempt + 1, 3));
-        
+
       } catch (error) {
         console.warn(`⚠️ Poll attempt ${attempt + 1} failed:`, error);
         await delay(baseDelay);
       }
     }
-    
+
     throw new Error('OCR job timed out - document may be too complex');
   }
 
@@ -705,28 +724,23 @@ Extract ACTUAL data from the resume. Do NOT use placeholder values.`;
   }
 
   /**
-   * Call Chat API with enhanced retry logic
+   * Call Chat API via Cloudflare Worker with retry logic
    */
   private static async callChatAPIWithRetry(prompt: string, retryCount = 0): Promise<ResumeData> {
     const MAX_RETRIES = 3;
-    
-    const requestBody = {
-      providers: 'openai/gpt-4o-mini',
-      text: prompt,
-      chatbot_global_action: 'You are an expert resume parser. Extract real data from resumes with complex layouts. Return only valid JSON.',
-      previous_history: [],
-      temperature: 0.05, // Lower temperature for more consistent parsing
-      max_tokens: 4000,
-    };
 
     try {
-      const response = await fetch(EDENAI_CHAT_URL, {
+      const response = await fetch(CLOUDFLARE_WORKER_URL, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${EDENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          prompt,
+          provider: 'openai/gpt-4o-mini',
+          temperature: 0.05,
+          maxTokens: 4000,
+        }),
       });
 
       if (!response.ok) {
@@ -734,34 +748,30 @@ Extract ACTUAL data from the resume. Do NOT use placeholder values.`;
           await delay(2000 * (retryCount + 1));
           return this.callChatAPIWithRetry(prompt, retryCount + 1);
         }
-        throw new Error(`Chat API failed: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Chat API failed: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();
-      const providerResult = result?.['openai/gpt-4o-mini'] || result?.['openai__gpt_4o_mini'];
-      
-      if (!providerResult || providerResult.status === 'fail') {
-        throw new Error(providerResult?.error?.message || 'Provider failed');
-      }
+      const content = result?.text || '';
 
-      const content = providerResult.generated_text || '';
       const jsonMatch = content.match(/\{[\s\S]*\}/);
-      
+
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
       return this.mapToResumeData(parsed);
-      
+
     } catch (error: any) {
       console.error('❌ Enhanced Chat API Error:', error.message);
-      
+
       if (retryCount < MAX_RETRIES) {
         await delay(2000 * (retryCount + 1));
         return this.callChatAPIWithRetry(prompt, retryCount + 1);
       }
-      
+
       throw error;
     }
   }
