@@ -275,25 +275,7 @@ export class EnhancedResumeParserService {
     try {
       const base64 = await this.fileToBase64(file);
 
-    const ocrUrl = `${CLOUDFLARE_WORKER_URL}/ocr`;
-console.log('📡 OCR URL:', ocrUrl);
-const response = await fetch(ocrUrl, {
-```
-
----
-
-## 🚀 Testing Steps
-
-1. **Make the changes above**
-2. **Stop dev server** (Ctrl+C)
-3. **Restart:** `npm run dev`
-4. **Hard refresh** browser (Ctrl+Shift+R)
-5. **Upload a resume**
-6. **Check console** - you should see:
-```
-🔗 Worker URL: https://damp-haze-85c6.harshithayadali30.workers.dev
-📡 OCR URL: https://damp-haze-85c6.harshithayadali30.workers.dev/ocr
-                                                              ↑ SINGLE SLASH ✅
+      const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
