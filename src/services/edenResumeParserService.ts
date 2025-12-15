@@ -18,6 +18,42 @@ const WORKER_URL = 'https://damp-haze-85c6.harshithayadali30.workers.dev';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isRawPDFContent = (text: string): boolean => {
+  if (!text || text.length < 100) return false;
+
+  const pdfPatterns = [
+    /%PDF-\d/,
+    /\/Type\s*\/Page/,
+    /\/Filter\s*\/FlateDecode/,
+    /stream\s+x/,
+    /endstream/,
+    /endobj/,
+    /\/Border\s*\[/,
+    /\/MediaBox\s*\[/,
+    /\/Contents\s+\d+\s+\d+\s+R/,
+    /\/Resources\s+\d+\s+\d+\s+R/,
+    /obj\s*<</,
+    />>\s*endobj/,
+  ];
+
+  let matchCount = 0;
+  for (const pattern of pdfPatterns) {
+    if (pattern.test(text)) {
+      matchCount++;
+    }
+  }
+
+  if (matchCount >= 3) return true;
+
+  const sampleText = text.substring(0, 2000);
+  const nonPrintableCount = (sampleText.match(/[\x00-\x08\x0E-\x1F]/g) || []).length;
+  const nonPrintableRatio = nonPrintableCount / sampleText.length;
+
+  if (nonPrintableRatio > 0.1) return true;
+
+  return false;
+};
+
 export interface ParsedResume extends ResumeData {
   parsedText: string;
   parsingConfidence?: number;
@@ -55,22 +91,13 @@ export const parseResumeFromFile = async (file: File): Promise<ParsedResume> => 
       // Use Mistral OCR via worker for PDF/DOCX
       try {
         extractedText = await extractTextWithMistralOCR(file);
-      } catch (ocrError: any) {
-        // Fallback: Try reading as text (for text-based PDFs)
-        try {
-          const textContent = await file.text();
-          const readableChars = textContent.substring(0, 2000).replace(/[\x00-\x08\x0E-\x1F\x7F-\xFF]/g, '');
-          if (readableChars.length > 200) {
-            extractedText = textContent
-              .replace(/[\x00-\x08\x0E-\x1F]/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-          } else {
-            throw new Error('File content is not readable text');
-          }
-        } catch (textError) {
-          throw new Error(`OCR extraction failed. Please try a different file format (PDF, DOCX, or TXT).`);
+
+        if (isRawPDFContent(extractedText)) {
+          throw new Error('OCR returned raw PDF data instead of extracted text');
         }
+      } catch (ocrError: any) {
+        console.error('OCR failed:', ocrError.message);
+        throw new Error(`Failed to extract text from file. Please try uploading a different PDF or use a DOCX/TXT file instead.`);
       }
     }
     
