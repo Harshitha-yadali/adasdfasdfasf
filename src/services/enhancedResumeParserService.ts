@@ -275,7 +275,9 @@ export class EnhancedResumeParserService {
     try {
       const base64 = await this.fileToBase64(file);
 
-      const response = await fetch(`${CLOUDFLARE_WORKER_URL}/ocr`, {
+     const ocrUrl = `${CLOUDFLARE_WORKER_URL}/ocr`;
+console.log('📡 OCR URL:', ocrUrl);
+const response = await fetch(ocrUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
