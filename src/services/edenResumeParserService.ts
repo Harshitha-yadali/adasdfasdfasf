@@ -13,7 +13,17 @@ import {
 } from '../types/resume';
 import { callCloudflareAI } from '../utils/cloudflareApi';
 
-const EDENAI_API_KEY = import.meta.env.VITE_EDENAI_API_KEY || '';
+let EDENAI_API_KEY = '';
+
+// Add function to fetch API key
+const fetchApiKey = async (): Promise<string> => {
+  const WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 
+    'https://damp-haze-85c6.harshithayadali30.workers.dev';
+  
+  const response = await fetch(`${WORKER_URL}/get-eden-key`);
+  const data = await response.json();
+  return data.apiKey;
+};
 const EDENAI_OCR_ASYNC_URL = 'https://api.edenai.run/v2/ocr/ocr_async'; // For multi-page PDFs with Mistral
 const EDENAI_CHAT_URL = 'https://api.edenai.run/v2/text/chat';
 
@@ -31,9 +41,8 @@ export interface ParsedResume extends ResumeData {
  */
 export const parseResumeFromFile = async (file: File): Promise<ParsedResume> => {
   if (!EDENAI_API_KEY) {
-    throw new Error('EdenAI API key not configured. Please check your .env file.');
+    EDENAI_API_KEY = await fetchApiKey();
   }
-
   let extractedText = '';
 
   try {
