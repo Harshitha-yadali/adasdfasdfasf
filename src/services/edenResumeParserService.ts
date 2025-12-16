@@ -11,6 +11,7 @@ import {
   Skill,
   Certification,
 } from '../types/resume';
+import { callCloudflareAI } from '../utils/cloudflareApi';
 
 const EDENAI_API_KEY = import.meta.env.VITE_EDENAI_API_KEY || '';
 const EDENAI_OCR_ASYNC_URL = 'https://api.edenai.run/v2/ocr/ocr_async'; // For multi-page PDFs with Mistral
