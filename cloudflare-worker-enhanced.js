@@ -26,6 +26,23 @@ export default {
     if (pathname === '/ocr' || pathname.startsWith('/ocr/')) {
       return handleOCRRequest(request, env, corsHeaders);
     }
+// EdenAI OCR Proxy Route
+if (pathname === '/ocr' || pathname.startsWith('/ocr/')) {
+  return handleOCRRequest(request, env, corsHeaders);
+}
+
+// 👇 ADD THE NEW CODE HERE (after line 28, before line 30)
+// GET /get-eden-key - Return EdenAI API key
+if (pathname === '/get-eden-key' && request.method === 'GET') {
+  return new Response(
+    JSON.stringify({ apiKey: env.EDENAI_API_KEY }),
+    { headers: corsHeaders }
+  );
+}
+
+// AI Chat Route (default)
+if (request.method !== "POST") {
+  return new Response(
 
     // AI Chat Route (default)
     if (request.method !== "POST") {
